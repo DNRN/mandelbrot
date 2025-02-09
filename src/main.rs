@@ -1,18 +1,97 @@
+use winit::application::ApplicationHandler;
+use winit::dpi::LogicalSize;
+use winit::event::WindowEvent;
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::window::{Window, WindowId};
+
+const WIDTH: u32 = 1920;
+const HEIGHT: u32 = 1080;
+
+#[derive(Default)]
+struct App {
+    window: Option<Window>,
+}
+
+impl ApplicationHandler for App {
+
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let mut window_attr = Window::default_attributes();
+        window_attr.title = "Mandelbrot".to_owned();
+        window_attr.inner_size = Some(LogicalSize::new(WIDTH, HEIGHT).into());
+        self.window = Some(event_loop.create_window(window_attr).unwrap());
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        match event {
+            WindowEvent::CloseRequested => {
+                println!("The close button was pressed; stopping");
+                event_loop.exit();
+            },
+            WindowEvent::RedrawRequested => {
+                // Redraw the application.
+                //
+                // It's preferable for applications that do not render continuously to render in
+                // this event rather than in AboutToWait, since rendering in here allows
+                // the program to gracefully handle redraws requested by the OS.
+
+                // Draw.
+
+                // Queue a RedrawRequested event.
+                //
+                // You only need to call this if you've determined that you need to redraw in
+                // applications which do not always need to. Applications that redraw continuously
+                // can render here instead.
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            _ => (),
+        }
+    }
+}
+
 fn main() {
-    let image_width = 1920;
-    let image_height = 1080;
+    let event_loop = EventLoop::new().unwrap();
+
+    // ControlFlow::Poll continuously runs the event loop, even if the OS hasn't
+    // dispatched any events. This is ideal for games and similar applications.
+    event_loop.set_control_flow(ControlFlow::Poll);
+
+    // ControlFlow::Wait pauses the event loop if no events are available to process.
+    // This is ideal for non-game applications that only update in response to user
+    // input, and uses significantly less power/CPU time than ControlFlow::Poll.
+    event_loop.set_control_flow(ControlFlow::Wait);
+
+    let mut app = App::default();
+    event_loop.run_app(&mut app);
+}
+
+fn draw_png (image_width: u32, image_height: u32, ) {
+    let ratio = image_height as f32 / image_width as f32;
+    let center = Point {x: 0.0, y: 0.0};
+    let width = 4.0 as f32;
+    let height = width * ratio;
+    let init_x = center.x - (width / 2 as f32);
+    let init_y = center.y - (height / 2 as f32);
+    let inc = width / (image_width as f32);
 
     let mut image_buffer = image::ImageBuffer::new(
         image_width, image_height);
 
     for (x, y, pixel) in image_buffer.enumerate_pixels_mut() {
-        let u = x as f32 / image_height as f32;
-        let v = y as f32 / image_height as f32;
-        let t = mandelbrot(2.5 * (u - 0.5) - 1.4, 2.5 * (v - 0.5));
+        // let u = x as f32 / image_height as f32;
+        // let v = y as f32 / image_height as f32;
+        // let t = mandelbrot(2.5 * (u - 0.5) - 1.4, 2.5 * (v - 0.5));
+        let u = init_x + (x as f32 * inc);
+        let v = init_y + (y as f32 * inc);
+        let t = mandelbrot(u, v);
         *pixel = image::Rgb(color((2.0 * t + 0.5) % 1.0));
     }
 
     image_buffer.save("mandelbrot.png").unwrap();
+}
+
+struct Point {
+    pub x: f32,
+    pub y: f32
 }
 
 #[derive(Clone, Copy)]
@@ -58,6 +137,8 @@ fn mandelbrot(x: f32, y: f32) -> f32 {
         z = z * z + c;
         i += 1;
     }
+    // let result = (i as f32 - z.arg_sq().log2().log2()) / (max as f32);
+    // println!("({},{})={}",x, y, result);
     return (i as f32 - z.arg_sq().log2().log2()) / (max as f32);
 }
 
