@@ -1,24 +1,101 @@
+use std::sync::Arc;
+use pixels::{Error, Pixels, SurfaceTexture};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
-const WIDTH: u32 = 1920;
-const HEIGHT: u32 = 1080;
+const WIDTH: u32 = 640;
+const HEIGHT: u32 = 480;
+
+struct WindowManager {
+    window: Window,
+    pixels: Pixels<'static>
+}
+
+impl WindowManager {
+    pub fn new(window: Window, pixels: Pixels<'static>) -> Self {
+        Self{
+            window,
+            pixels,
+        }
+    }
+}
 
 #[derive(Default)]
 struct App {
-    window: Option<Window>,
+    // window_manager: Option<WindowManager>
+    window: Option<Arc<Window>>,
+    pixels: Option<Pixels<'static>>,
+}
+
+impl App {
+    
+
+    fn create_window(&mut self, event_loop: &ActiveEventLoop) {
+        let window = {
+            let size = LogicalSize::new(WIDTH, HEIGHT);
+            let window = event_loop.create_window(Window::default_attributes()
+                .with_title("Mandelbrot")
+                .with_inner_size(size)
+                .with_min_inner_size(size)
+            ).unwrap();
+            Arc::new(window)
+        };
+
+        self.window = Some(window);
+        
+        // Create another reference-counted pointer to the same Window
+        let window_clone = Arc::clone(&self.window.as_ref().unwrap());
+
+        let pixels = {
+            let window_size =  self.window.as_ref().unwrap().inner_size();
+            let surface_texture = SurfaceTexture::new(window_size.width, window_size.height, window_clone);
+
+            Pixels::new(WIDTH, HEIGHT, surface_texture).unwrap()
+        };
+
+        self.pixels = Some(pixels);
+        
+
+        // self.window = Some(window);
+    }
+
+    fn draw(frame: &mut [u8], size: PhysicalSize<u32>) {
+        let width = size.width;
+        let height = size.height;
+        println!("({},{})", width, height);
+        let ratio = height as f32 / width as f32;
+        let center = Point {x: -0.5, y: 0.0};
+        let width_plot = 4.0 as f32;
+        let height_plot = width_plot * ratio;
+        let init_x = center.x - (width_plot / 2 as f32);
+        let init_y = center.y - (height_plot / 2 as f32);
+        let inc = width_plot / (width as f32);
+
+        for (i, pixel) in frame.chunks_exact_mut(4).enumerate() {
+            let x = (i % width as usize) as i16;
+            let y = (i / width as usize) as i16;
+
+            let u = init_x + (x as f32 * inc);
+            let v = init_y + (y as f32 * inc);
+            let t = mandelbrot(u, v);
+            let color = color((2.0 * t + 0.5) % 1.0);
+
+            pixel[0] = color[0]; // Red
+            pixel[1] = color[1];   // Green
+            pixel[2] = color[2];   // Blue
+            pixel[3] = 255; // Alpha (fully opaque)
+        }
+    }
 }
 
 impl ApplicationHandler for App {
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let mut window_attr = Window::default_attributes();
-        window_attr.title = "Mandelbrot".to_owned();
-        window_attr.inner_size = Some(LogicalSize::new(WIDTH, HEIGHT).into());
-        self.window = Some(event_loop.create_window(window_attr).unwrap());
+        self.create_window(&event_loop);
+        self.window.as_ref().unwrap().request_redraw();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -27,6 +104,16 @@ impl ApplicationHandler for App {
                 println!("The close button was pressed; stopping");
                 event_loop.exit();
             },
+            WindowEvent::Resized(new_size) => {
+                println!("Window resized: {}x{}", new_size.width, new_size.height);
+                
+                if let Some(pixels) = self.pixels.as_mut() {
+                    pixels.resize_surface(new_size.width, new_size.height).unwrap();
+                    pixels.resize_buffer(new_size.width, new_size.height).unwrap();
+                }
+    
+                self.window.as_ref().unwrap().request_redraw(); // Trigger redraw after resize
+            }
             WindowEvent::RedrawRequested => {
                 // Redraw the application.
                 //
@@ -41,14 +128,30 @@ impl ApplicationHandler for App {
                 // You only need to call this if you've determined that you need to redraw in
                 // applications which do not always need to. Applications that redraw continuously
                 // can render here instead.
+                // First, get a mutable reference to `pixels`
+                let width = self.pixels.as_ref().unwrap().texture().width();
+                let height = self.pixels.as_ref().unwrap().texture().height();
+                println!("Pixels Frame Size: {}x{}", width, height);
+
+                let pixels = self.pixels.as_mut().unwrap();
+                let frame = pixels.frame_mut(); // Borrow the frame buffer
+
+                
+                println!("Pixels Frame Size: {}x{}", width, height);
+
+                // Now, call draw WITHOUT borrowing `self` again
+                Self::draw(frame, self.window.as_ref().unwrap().inner_size());
+
+                pixels.render().expect("Failed to render frame");
                 self.window.as_ref().unwrap().request_redraw();
+                // self.window_manager.as_ref().unwrap().window.request_redraw();
             }
             _ => (),
         }
     }
 }
 
-fn main() {
+fn main() -> Result<(), Error> {
     let event_loop = EventLoop::new().unwrap();
 
     // ControlFlow::Poll continuously runs the event loop, even if the OS hasn't
@@ -62,6 +165,9 @@ fn main() {
 
     let mut app = App::default();
     event_loop.run_app(&mut app);
+
+
+    return Ok(());
 }
 
 fn draw_png (image_width: u32, image_height: u32, ) {
