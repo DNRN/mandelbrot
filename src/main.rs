@@ -2,37 +2,21 @@ use std::sync::Arc;
 use pixels::{Error, Pixels, SurfaceTexture};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::WindowEvent;
+use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 480;
 
-struct WindowManager {
-    window: Window,
-    pixels: Pixels<'static>
-}
-
-impl WindowManager {
-    pub fn new(window: Window, pixels: Pixels<'static>) -> Self {
-        Self{
-            window,
-            pixels,
-        }
-    }
-}
-
 #[derive(Default)]
 struct App {
-    // window_manager: Option<WindowManager>
     window: Option<Arc<Window>>,
     pixels: Option<Pixels<'static>>,
+    cursor_position: Option<(f64, f64)>,
 }
 
 impl App {
-    
-
     fn create_window(&mut self, event_loop: &ActiveEventLoop) {
         let window = {
             let size = LogicalSize::new(WIDTH, HEIGHT);
@@ -63,23 +47,24 @@ impl App {
     }
 
     fn draw(frame: &mut [u8], size: PhysicalSize<u32>) {
+        // let fractal_plot = FractalPlot::new(Point {x: -1.0, y: 0.0}, size);
         let width = size.width;
         let height = size.height;
-        println!("({},{})", width, height);
         let ratio = height as f32 / width as f32;
-        let center = Point {x: -0.5, y: 0.0};
-        let width_plot = 4.0 as f32;
+        let center = Point {x: -1.0, y: 0.0};
+        let width_plot = 4 as f32;
         let height_plot = width_plot * ratio;
         let init_x = center.x - (width_plot / 2 as f32);
         let init_y = center.y - (height_plot / 2 as f32);
         let inc = width_plot / (width as f32);
 
         for (i, pixel) in frame.chunks_exact_mut(4).enumerate() {
-            let x = (i % width as usize) as i16;
-            let y = (i / width as usize) as i16;
+            let x = (i % size.width as usize) as i16;
+            let y = (i / size.height as usize) as i16;
 
             let u = init_x + (x as f32 * inc);
             let v = init_y + (y as f32 * inc);
+            // let point = fractal_plot.getPoint((x, y));
             let t = mandelbrot(u, v);
             let color = color((2.0 * t + 0.5) % 1.0);
 
@@ -89,6 +74,7 @@ impl App {
             pixel[3] = 255; // Alpha (fully opaque)
         }
     }
+
 }
 
 impl ApplicationHandler for App {
@@ -105,8 +91,6 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             },
             WindowEvent::Resized(new_size) => {
-                println!("Window resized: {}x{}", new_size.width, new_size.height);
-                
                 if let Some(pixels) = self.pixels.as_mut() {
                     pixels.resize_surface(new_size.width, new_size.height).unwrap();
                     pixels.resize_buffer(new_size.width, new_size.height).unwrap();
@@ -114,6 +98,16 @@ impl ApplicationHandler for App {
     
                 self.window.as_ref().unwrap().request_redraw(); // Trigger redraw after resize
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor_position = Some((position.x, position.y));
+            },
+            WindowEvent::MouseInput { device_id, state, button } => {
+                if state == ElementState::Pressed {
+                    if let (Some(window), Some(position)) = (&self.window, &self.cursor_position) {
+                        println!("Mouse clicked: ({:?},{:?})", position.0, position.1)
+                    }
+                }
+            },
             WindowEvent::RedrawRequested => {
                 // Redraw the application.
                 //
@@ -128,23 +122,20 @@ impl ApplicationHandler for App {
                 // You only need to call this if you've determined that you need to redraw in
                 // applications which do not always need to. Applications that redraw continuously
                 // can render here instead.
-                // First, get a mutable reference to `pixels`
-                let width = self.pixels.as_ref().unwrap().texture().width();
-                let height = self.pixels.as_ref().unwrap().texture().height();
-                println!("Pixels Frame Size: {}x{}", width, height);
-
-                let pixels = self.pixels.as_mut().unwrap();
-                let frame = pixels.frame_mut(); // Borrow the frame buffer
-
-                
-                println!("Pixels Frame Size: {}x{}", width, height);
-
-                // Now, call draw WITHOUT borrowing `self` again
-                Self::draw(frame, self.window.as_ref().unwrap().inner_size());
-
-                pixels.render().expect("Failed to render frame");
-                self.window.as_ref().unwrap().request_redraw();
-                // self.window_manager.as_ref().unwrap().window.request_redraw();
+                // First, get a immutable reference to `pixels`
+                if let Some(pixels) = &self.pixels {
+                    let widdth = pixels.texture().width();
+                    let height = pixels.texture().height();
+                }
+                // Example of mutable borowing handling panics combined with immutable borrowing
+                if let (Some(pixels), Some(window)) = (&mut self.pixels, &self.window) {
+                    // Borrow the frame buffer
+                    let frame = pixels.frame_mut();
+                    // Now, call draw WITHOUT borrowing `self` again
+                    Self::draw(frame, window.inner_size());
+                    pixels.render().expect("Failed to render frame");
+                    window.request_redraw();
+                }
             }
             _ => (),
         }
@@ -195,6 +186,34 @@ fn draw_png (image_width: u32, image_height: u32, ) {
     image_buffer.save("mandelbrot.png").unwrap();
 }
 
+struct FractalPlot {
+    center: Point,
+    width: f32,
+    height: f32,
+    init_x: f32,
+    init_y: f32,
+    inc: f32,
+}
+
+impl FractalPlot {
+    pub fn new(center: Point, screen_size: PhysicalSize<u32>) -> Self {
+        let ratio = screen_size.height as f32 / screen_size.width as f32;
+        let width = 4.0 as f32;
+        let height = width * ratio;
+        let init_x = center.x - (width / 2 as f32);
+        let init_y = center.y - (height / 2 as f32);
+        let inc = width / (screen_size.width as f32);
+
+        Self { center, width, height, init_x, init_y, inc }
+    }
+
+    pub fn getPoint(&self, screenCoordinate: (i16, i16)) -> (f32, f32) {
+        let u = self.init_x + (screenCoordinate.0 as f32 * self.inc);
+        let v = self.init_y + (screenCoordinate.1 as f32 * self.inc);
+        return (u, v)
+    }
+}
+
 struct Point {
     pub x: f32,
     pub y: f32
@@ -243,8 +262,6 @@ fn mandelbrot(x: f32, y: f32) -> f32 {
         z = z * z + c;
         i += 1;
     }
-    // let result = (i as f32 - z.arg_sq().log2().log2()) / (max as f32);
-    // println!("({},{})={}",x, y, result);
     return (i as f32 - z.arg_sq().log2().log2()) / (max as f32);
 }
 
